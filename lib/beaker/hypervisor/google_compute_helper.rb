@@ -17,6 +17,7 @@ module Beaker
     BASE_URL = "https://www.googleapis.com/compute/#{API_VERSION}/projects/"
     CENTOS_PROJECT = 'centos-cloud'
     DEBIAN_PROJECT = 'debian-cloud'
+    UBUNTU_PROJECT = 'ubuntu-os-cloud'
     DEFAULT_ZONE_NAME = 'us-central1-a'
     DEFAULT_MACHINE_TYPE = 'n1-highmem-2'
     DEFAULT_DISK_SIZE = 25
@@ -50,13 +51,26 @@ module Beaker
     #Determines the default Google Compute zone based upon options and defaults
     #@return The full URL to the default zone in which Google Compute requests will be sent
     def default_zone
-      BASE_URL + @options[:gce_project] + '/global/zones/' + DEFAULT_ZONE_NAME
+      BASE_URL + @options[:gce_project] + '/global/zones/' + default_zone_name
     end
+
+    # Determine the zone name
+    # @return The name string of the zone to use
+    def default_zone_name
+      @options.fetch(:gce_zone_name, DEFAULT_ZONE_NAME)
+    end
+
+    # Determine the network name
+    # @return The name string of the network to use
+    def default_network_name
+      @options.fetch(:gce_network, 'default')
+    end
+
 
     #Determines the default Google Compute network based upon defaults and options
     #@return The full URL to the default network in which Google Compute instances will operate
     def default_network
-      BASE_URL + @options[:gce_project] + '/global/networks/default'
+      BASE_URL + @options[:gce_project] + '/global/networks/' + default_network_name
     end
 
     #Determines the Google Compute project which contains bases instances of type name
@@ -68,6 +82,10 @@ module Beaker
         return DEBIAN_PROJECT
       elsif name =~ /centos/
         return CENTOS_PROJECT
+      elsif name =~ /ubuntu/
+        return UBUNTU_PROJECT
+      elsif !@options[:gce_platform_project].nil?
+        return @options[:gce_platform_project]
       else
         raise "Unsupported platform for Google Compute Engine: #{name}"
       end
@@ -177,9 +195,12 @@ module Beaker
     #@raise [Exception] Raised if we fail to execute the request, either through errors or running out of attempts
     def get_latest_image(platform, start, attempts)
       #use the platform version numbers instead of codenames
+      project, platform = platform.split('/')
+      platform = project if platform.nil?
       platform = platform.with_version_number
       #break up my platform for information
       platform_name, platform_version, platform_extra_info = platform.split('-', 3)
+
       #find latest image to use
       result = execute( image_list_req(get_platform_project(platform_name)), start, attempts )
       images = result["items"]
@@ -432,7 +453,7 @@ module Beaker
     #@return [Hash] A correctly formatted Google Compute request hash
     def disk_list_req
       { :api_method  => @compute.disks.list,
-        :parameters  => { 'project' => @options[:gce_project], 'zone' => DEFAULT_ZONE_NAME } }
+        :parameters  => { 'project' => @options[:gce_project], 'zone' => default_zone_name} }
     end
 
     #Create a Google Compute get disk request
@@ -440,7 +461,7 @@ module Beaker
     #@return [Hash] A correctly formatted Google Compute request hash
     def disk_get_req(name)
       { :api_method  => @compute.disks.get,
-        :parameters  => { 'project' => @options[:gce_project], 'zone' => DEFAULT_ZONE_NAME, 'disk' => name } }
+        :parameters  => { 'project' => @options[:gce_project], 'zone' => default_zone_name, 'disk' => name } }
     end
 
     #Create a Google Compute disk delete request
@@ -448,7 +469,7 @@ module Beaker
     #@return [Hash] A correctly formatted Google Compute request hash
     def disk_delete_req(name)
       { :api_method  => @compute.disks.delete,
-        :parameters  => { 'project' => @options[:gce_project], 'zone' => DEFAULT_ZONE_NAME, 'disk' => name } }
+        :parameters  => { 'project' => @options[:gce_project], 'zone' => default_zone_name, 'disk' => name } }
     end
 
     #Create a Google Compute disk create request
@@ -457,7 +478,7 @@ module Beaker
     #@return [Hash] A correctly formatted Google Compute request hash
     def disk_insert_req(name, source)
       { :api_method  => @compute.disks.insert,
-        :parameters  => { 'project' => @options[:gce_project], 'zone' => DEFAULT_ZONE_NAME, 'sourceImage' => source },
+        :parameters  => { 'project' => @options[:gce_project], 'zone' => default_zone_name, 'sourceImage' => source },
         :body_object => { 'name' => name, 'sizeGb' => DEFAULT_DISK_SIZE } }
     end
 
@@ -466,7 +487,7 @@ module Beaker
     #@return [Hash] A correctly formatted Google Compute request hash
     def firewall_get_req(name)
       { :api_method  => @compute.firewalls.get,
-        :parameters  => { 'project' => @options[:gce_project], 'zone' => DEFAULT_ZONE_NAME, 'firewall' => name } }
+        :parameters  => { 'project' => @options[:gce_project], 'zone' => default_zone_name, 'firewall' => name } }
     end
 
     #Create a Google Compute insert firewall request, open ports 443, 8140 and 61613
@@ -475,7 +496,7 @@ module Beaker
     #@return [Hash] A correctly formatted Google Compute request hash
     def firewall_insert_req(name, network)
       { :api_method  => @compute.firewalls.insert,
-        :parameters  => { 'project' => @options[:gce_project], 'zone' => DEFAULT_ZONE_NAME },
+        :parameters  => { 'project' => @options[:gce_project], 'zone' => default_zone_name },
         :body_object => { 'name' => name,
                           'allowed'=> [ { 'IPProtocol' => 'tcp', "ports" =>  [ '443', '8140', '61613', '8080', '8081' ]} ],
                           'network'=> network,
@@ -487,29 +508,29 @@ module Beaker
     #@return [Hash] A correctly formatted Google Compute request hash
     def firewall_delete_req(name)
       { :api_method  => @compute.firewalls.delete,
-        :parameters  => { 'project' => @options[:gce_project], 'zone' => DEFAULT_ZONE_NAME, 'firewall' => name } }
+        :parameters  => { 'project' => @options[:gce_project], 'zone' => default_zone_name, 'firewall' => name } }
     end
 
     #Create a Google Compute list firewall request
     #@return [Hash] A correctly formatted Google Compute request hash
     def firewall_list_req()
       { :api_method  => @compute.firewalls.list,
-        :parameters  => { 'project' => @options[:gce_project], 'zone' => DEFAULT_ZONE_NAME } }
+        :parameters  => { 'project' => @options[:gce_project], 'zone' => default_zone_name } }
     end
 
     #Create a Google Compute get network request
     #@param [String] name (default) The name of the network to access information about
     #@return [Hash] A correctly formatted Google Compute request hash
-    def network_get_req(name = 'default')
+    def network_get_req(name = default_network_name)
       { :api_method  => @compute.networks.get,
-        :parameters  => { 'project' => @options[:gce_project], 'zone' => DEFAULT_ZONE_NAME, 'network' => name } }
+        :parameters  => { 'project' => @options[:gce_project], 'zone' => default_zone_name, 'network' => name } }
     end
 
     #Create a Google Compute zone operation request
     #@return [Hash] A correctly formatted Google Compute request hash
     def operation_get_req(name)
       { :api_method  => @compute.zone_operations.get,
-        :parameters  => { 'project' => @options[:gce_project], 'zone' => DEFAULT_ZONE_NAME, 'operation' => name } }
+        :parameters  => { 'project' => @options[:gce_project], 'zone' => default_zone_name, 'operation' => name } }
     end
 
     #Set tags on a Google Compute instance
@@ -517,7 +538,7 @@ module Beaker
     #@return [Hash] A correctly formatted Google Compute request hash
     def instance_setMetadata_req(name, fingerprint, data)
       { :api_method => @compute.instances.set_metadata,
-        :parameters  => { 'project' => @options[:gce_project], 'zone' => DEFAULT_ZONE_NAME, 'instance' => name },
+        :parameters  => { 'project' => @options[:gce_project], 'zone' => default_zone_name, 'instance' => name },
         :body_object => { 'kind' => 'compute#metadata',
                           'fingerprint'  => fingerprint,
                           'items' => data }
@@ -528,7 +549,7 @@ module Beaker
     #@return [Hash] A correctly formatted Google Compute request hash
     def instance_list_req
       { :api_method  => @compute.instances.list,
-        :parameters  => { 'project' => @options[:gce_project], 'zone' => DEFAULT_ZONE_NAME } }
+        :parameters  => { 'project' => @options[:gce_project], 'zone' => default_zone_name } }
     end
 
     #Create a Google Compute get instance request
@@ -536,7 +557,7 @@ module Beaker
     #@return [Hash] A correctly formatted Google Compute request hash
     def instance_get_req(name)
       { :api_method  => @compute.instances.get,
-        :parameters  => { 'project' => @options[:gce_project], 'zone' => DEFAULT_ZONE_NAME, 'instance' => name } }
+        :parameters  => { 'project' => @options[:gce_project], 'zone' => default_zone_name, 'instance' => name } }
     end
 
     #Create a Google Compute instance delete request
@@ -544,7 +565,7 @@ module Beaker
     #@return [Hash] A correctly formatted Google Compute request hash
     def instance_delete_req(name)
       { :api_method  => @compute.instances.delete,
-        :parameters  => { 'project' => @options[:gce_project], 'zone' => DEFAULT_ZONE_NAME, 'instance' => name } }
+        :parameters  => { 'project' => @options[:gce_project], 'zone' => default_zone_name, 'instance' => name } }
     end
 
     #Create a Google Compute instance create request
@@ -555,7 +576,7 @@ module Beaker
     #@return [Hash] A correctly formatted Google Compute request hash
     def instance_insert_req(name, image, machineType, disk)
       { :api_method  => @compute.instances.insert,
-        :parameters  => { 'project' => @options[:gce_project], 'zone' => DEFAULT_ZONE_NAME },
+        :parameters  => { 'project' => @options[:gce_project], 'zone' => default_zone_name },
         :body_object => { 'name' => name,
                           'image' => image,
                           'zone' => default_zone,
@@ -570,7 +591,7 @@ module Beaker
     #@return [Hash] A correctly formatted Google Compute request hash
     def machineType_get_req()
       { :api_method => @compute.machine_types.get,
-        :parameters => { 'project' => @options[:gce_project], 'zone' => DEFAULT_ZONE_NAME, 'machineType' => @options[:gce_machine_type] || DEFAULT_MACHINE_TYPE } }
+        :parameters => { 'project' => @options[:gce_project], 'zone' => default_zone_name, 'machineType' => @options[:gce_machine_type] || DEFAULT_MACHINE_TYPE } }
     end
 
   end

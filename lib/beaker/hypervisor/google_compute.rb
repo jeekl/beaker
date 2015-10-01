@@ -50,7 +50,7 @@ module Beaker
       @firewall = generate_host_name
       @gce_helper.create_firewall(@firewall, network, start, attempts)
 
-      @logger.debug("Created Google Compute firewall #{@firewall}")
+      @logger.debug("Created Google Compute firewall #{@firewall} in network #{network['name']}")
 
 
       @hosts.each do |host|
@@ -64,7 +64,7 @@ module Beaker
         host['vmhostname'] = generate_host_name
         #add a new instance of the image
         instance = @gce_helper.create_instance(host['vmhostname'], img, machineType, disk, start, attempts)
-        @logger.debug("Created Google Compute instance for #{host.name}: #{host['vmhostname']}")
+        @logger.debug("Created Google Compute instance for #{host.name}: #{host['vmhostname']} in #{instance['zone']} of type #{machineType['name']}")
 
         #add metadata to instance, if there is any to set
         mdata = format_metadata
@@ -75,12 +75,19 @@ module Beaker
           @logger.debug("Added tags to Google Compute instance #{host.name}: #{host['vmhostname']}")
         end
 
-        #get ip for this host
-        host['ip'] = instance['networkInterfaces'][0]['accessConfigs'][0]['natIP']
+        # Get IP of this machine, use the external (ephemeral) IP by default, or use the internal IP based on :gce_network_type
+        net_type = @options.fetch(:gce_network_type, 'external')
+        if net_type == 'internal'
+          host['ip'] = instance['networkInterfaces'][0]['networkIP']
+        elsif net_type == 'external'
+          host['ip'] = instance['networkInterfaces'][0]['accessConfigs'][0]['natIP']
+        else
+          @logger.error("No supported GCE network type set")
+        end
 
         #configure ssh
         default_user = host['user']
-        host['user'] = 'google_compute'
+        host['user'] = @options.fetch(:gce_user, 'google_compute')
 
         disable_se_linux(host, @options)
         copy_ssh_to_root(host, @options)
